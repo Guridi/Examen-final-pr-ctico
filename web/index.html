@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reconocimiento de letras — EMNIST</title>
+<style>
+  :root{
+    --fondo:#f4f6fb; --tarjeta:#ffffff; --texto:#1b2430; --suave:#5d6b7f;
+    --borde:#d9e0ea; --acento:#2f6fed; --acento-suave:#e8f0ff;
+    --ok:#1f9d6b; --error:#d1495b; --sombra:0 10px 30px rgba(20,35,60,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --fondo:#11151c; --tarjeta:#1a212b; --texto:#eef3f9; --suave:#9aa8bb;
+      --borde:#2b3644; --acento:#5b91ff; --acento-suave:#1e2a41;
+      --ok:#3ecf8e; --error:#ff6b7f; --sombra:0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:28px 16px 56px; background:var(--fondo); color:var(--texto);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; align-items:center; gap:22px;
+  }
+  header{text-align:center; max-width:640px}
+  h1{margin:0 0 6px; font-size:1.6rem; letter-spacing:-.02em}
+  header p{margin:0; color:var(--suave); font-size:.95rem}
+  .tarjeta{
+    background:var(--tarjeta); border:1px solid var(--borde); border-radius:16px;
+    box-shadow:var(--sombra); padding:20px; width:100%; max-width:560px;
+  }
+  .titulo-seccion{
+    font-size:.78rem; text-transform:uppercase; letter-spacing:.08em;
+    color:var(--suave); margin:0 0 12px; font-weight:600;
+  }
+  /* ---- Recuadro de dibujo ---- */
+  .marco{display:flex; justify-content:center}
+  canvas{
+    width:280px; height:280px; background:#fff; border:2px dashed var(--borde);
+    border-radius:12px; cursor:crosshair; touch-action:none; display:block;
+  }
+  .acciones{display:flex; gap:10px; justify-content:center; margin-top:16px; flex-wrap:wrap}
+  button{
+    font:inherit; font-weight:600; padding:10px 20px; border-radius:10px;
+    border:1px solid var(--borde); background:var(--tarjeta); color:var(--texto);
+    cursor:pointer; transition:transform .06s ease, background .15s ease;
+  }
+  button:hover{background:var(--acento-suave)}
+  button:active{transform:translateY(1px)}
+  button.primario{background:var(--acento); border-color:var(--acento); color:#fff}
+  button.primario:hover{filter:brightness(1.08)}
+  /* ---- Resultado ---- */
+  .resultado{display:flex; gap:20px; align-items:center; flex-wrap:wrap}
+  .letra{
+    font-size:5rem; font-weight:700; line-height:1; min-width:110px; text-align:center;
+    color:var(--acento); font-variant-numeric:tabular-nums;
+  }
+  .datos{flex:1; min-width:200px}
+  .prob{font-size:1.5rem; font-weight:700; margin:0 0 2px}
+  .etiqueta-prob{margin:0 0 12px; color:var(--suave); font-size:.85rem}
+  .barra{height:9px; background:var(--acento-suave); border-radius:99px; overflow:hidden}
+  .barra > span{display:block; height:100%; background:var(--acento); width:0; transition:width .35s ease}
+  .vista-modelo{text-align:center}
+  .vista-modelo img{
+    width:112px; height:112px; image-rendering:pixelated; border-radius:10px;
+    border:1px solid var(--borde); background:#000;
+  }
+  .vista-modelo span{display:block; font-size:.72rem; color:var(--suave); margin-top:6px}
+  table{width:100%; border-collapse:collapse; margin-top:18px; font-size:.9rem}
+  th,td{text-align:left; padding:7px 6px; border-bottom:1px solid var(--borde)}
+  th{color:var(--suave); font-weight:600; font-size:.75rem; text-transform:uppercase; letter-spacing:.05em}
+  td.pct{text-align:right; font-variant-numeric:tabular-nums; color:var(--suave)}
+  tr.top td{color:var(--texto); font-weight:700}
+  .mini{height:6px; background:var(--acento-suave); border-radius:99px; overflow:hidden; width:100%}
+  .mini > span{display:block; height:100%; background:var(--acento)}
+  .aviso{color:var(--suave); text-align:center; padding:12px 0; font-size:.92rem}
+  .aviso.err{color:var(--error)}
+  footer{color:var(--suave); font-size:.8rem; text-align:center; max-width:560px}
+  .oculto{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Reconocimiento de letras manuscritas</h1>
+  <p>Dibuja una letra (A–Z) dentro del recuadro. El modelo entrenado con EMNIST
+     predecirá de qué letra se trata.</p>
+</header>
+
+<!-- ------------------ RECUADRO PARA COLOCAR LA LETRA ------------------ -->
+<section class="tarjeta">
+  <p class="titulo-seccion">1 · Escribe aquí la letra</p>
+  <div class="marco">
+    <canvas id="lienzo" width="280" height="280" aria-label="Recuadro para dibujar una letra"></canvas>
+  </div>
+  <div class="acciones">
+    <button class="primario" id="btn-predecir">Predecir</button>
+    <button id="btn-limpiar">Limpiar</button>
+  </div>
+</section>
+
+<!-- ------------------------- RESULTADO DEBAJO ------------------------- -->
+<section class="tarjeta">
+  <p class="titulo-seccion">2 · Resultado de la predicción</p>
+
+  <div id="aviso" class="aviso">Dibuja una letra y pulsa «Predecir».</div>
+
+  <div id="panel" class="oculto">
+    <div class="resultado">
+      <div class="letra" id="letra">—</div>
+      <div class="datos">
+        <p class="prob" id="prob">—</p>
+        <p class="etiqueta-prob" id="texto-prob">probabilidad de la predicción</p>
+        <div class="barra"><span id="barra"></span></div>
+      </div>
+      <div class="vista-modelo">
+        <img id="procesada" alt="Imagen procesada 28x28 que recibe la red">
+        <span>lo que ve la red<br>(28×28)</span>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>Letra</th><th>Confianza</th><th class="pct">Prob.</th></tr>
+      </thead>
+      <tbody id="tabla"></tbody>
+    </table>
+  </div>
+</section>
+
+<footer id="pie">Modelo entrenado con el conjunto de datos EMNIST (letters, 26 clases).</footer>
+
+<script>
+(function(){
+  const lienzo   = document.getElementById('lienzo');
+  const ctx      = lienzo.getContext('2d', { willReadFrequently: true });
+  const aviso    = document.getElementById('aviso');
+  const panel    = document.getElementById('panel');
+  const elLetra  = document.getElementById('letra');
+  const elProb   = document.getElementById('prob');
+  const elBarra  = document.getElementById('barra');
+  const elImg    = document.getElementById('procesada');
+  const elTabla  = document.getElementById('tabla');
+
+  // ---- Preparación del lienzo: tinta negra sobre fondo blanco.
+  // El servidor detecta que hay que invertir los colores para dejarlo
+  // en el formato de EMNIST (trazo blanco sobre fondo negro).
+  function limpiar(){
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, lienzo.width, lienzo.height);
+    hayTrazo = false;
+    panel.classList.add('oculto');
+    aviso.classList.remove('oculto', 'err');
+    aviso.textContent = 'Dibuja una letra y pulsa «Predecir».';
+  }
+  ctx.lineWidth = 22;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#000000';
+
+  let dibujando = false, hayTrazo = false, temporizador = null;
+
+  function posicion(ev){
+    const r = lienzo.getBoundingClientRect();
+    const p = ev.touches ? ev.touches[0] : ev;
+    return {
+      x: (p.clientX - r.left) * (lienzo.width  / r.width),
+      y: (p.clientY - r.top ) * (lienzo.height / r.height)
+    };
+  }
+  function iniciar(ev){
+    ev.preventDefault();
+    dibujando = true; hayTrazo = true;
+    const {x, y} = posicion(ev);
+    ctx.beginPath(); ctx.moveTo(x, y);
+    ctx.lineTo(x + 0.01, y + 0.01); ctx.stroke();   // un punto suelto también pinta
+    clearTimeout(temporizador);
+  }
+  function mover(ev){
+    if(!dibujando) return;
+    ev.preventDefault();
+    const {x, y} = posicion(ev);
+    ctx.lineTo(x, y); ctx.stroke();
+  }
+  function soltar(){
+    if(!dibujando) return;
+    dibujando = false;
+    clearTimeout(temporizador);
+    temporizador = setTimeout(predecir, 550);   // predicción automática al soltar
+  }
+
+  lienzo.addEventListener('mousedown', iniciar);
+  lienzo.addEventListener('mousemove', mover);
+  window.addEventListener('mouseup', soltar);
+  lienzo.addEventListener('touchstart', iniciar, {passive:false});
+  lienzo.addEventListener('touchmove',  mover,   {passive:false});
+  lienzo.addEventListener('touchend',   soltar);
+
+  document.getElementById('btn-limpiar').addEventListener('click', limpiar);
+  document.getElementById('btn-predecir').addEventListener('click', () => predecir());
+
+  function mostrarAviso(texto, esError){
+    panel.classList.add('oculto');
+    aviso.classList.remove('oculto');
+    aviso.classList.toggle('err', !!esError);
+    aviso.textContent = texto;
+  }
+
+  // ---- Localización del servidor -------------------------------------
+  // Lo normal es que la página la sirva el propio Flask, así que basta con
+  // rutas relativas. Pero si se abre el archivo directamente (file://) o
+  // desde otro servidor estático (Live Server), probamos también el puerto
+  // por defecto del servidor de predicción.
+  const RESPALDO = 'http://127.0.0.1:5000';
+  let api = null;            // base que funciona; null = aún no encontrada
+
+  async function localizarServidor(){
+    const candidatos = location.protocol === 'file:' ? [RESPALDO] : ['', RESPALDO];
+    for(const base of candidatos){
+      try{
+        const r = await fetch(base + '/estado', {cache:'no-store'});
+        if(!r.ok) continue;
+        const d = await r.json();
+        api = base;
+        return d;
+      }catch(e){ /* probamos el siguiente candidato */ }
+    }
+    return null;
+  }
+
+  const AYUDA_SERVIDOR =
+    'No hay ningún servidor de predicción escuchando. Arráncalo con ' +
+    '«python src/server.py» y abre la página en http://127.0.0.1:5000 ' +
+    '(no basta con abrir el archivo index.html directamente).';
+
+  function predecir(){
+    if(!hayTrazo){ mostrarAviso('El recuadro está vacío: dibuja una letra primero.', true); return; }
+    enviar(lienzo.toDataURL('image/png'));
+  }
+
+  async function enviar(dataURL){
+    if(api === null){
+      const estado = await localizarServidor();
+      if(estado === null){ mostrarAviso(AYUDA_SERVIDOR, true); return; }
+    }
+    mostrarAviso('Prediciendo…', false);
+    let resp;
+    try{
+      resp = await fetch(api + '/predecir', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({imagen: dataURL})
+      });
+    }catch(err){
+      api = null;
+      mostrarAviso(AYUDA_SERVIDOR, true);
+      return;
+    }
+
+    // Leemos el cuerpo como texto y lo interpretamos con cuidado: si el
+    // servidor devuelve un 404 en HTML o una respuesta vacía, queremos un
+    // mensaje claro y no un error de análisis de JSON.
+    const texto = await resp.text();
+    let datos = null;
+    try{ datos = JSON.parse(texto); }catch(e){ /* no era JSON */ }
+
+    if(datos === null){
+      mostrarAviso(
+        'El servidor respondió algo que no es JSON (HTTP ' + resp.status + '). ' + AYUDA_SERVIDOR,
+        true);
+      return;
+    }
+    if(!resp.ok){ mostrarAviso(datos.error || ('Error del servidor (HTTP ' + resp.status + ').'), true); return; }
+    pintarResultado(datos);
+  }
+
+  function pintarResultado(d){
+    aviso.classList.add('oculto');
+    panel.classList.remove('oculto');
+    elLetra.textContent = d.letra;
+    elProb.textContent  = (d.probabilidad * 100).toFixed(2) + ' %';
+    elBarra.style.width = (d.probabilidad * 100).toFixed(1) + '%';
+    elImg.src = d.imagen_procesada;
+
+    elTabla.innerHTML = '';
+    d.top5.forEach(([letra, p], i) => {
+      const fila = document.createElement('tr');
+      if(i === 0) fila.className = 'top';
+      fila.innerHTML =
+        '<td>' + letra + '</td>' +
+        '<td><div class="mini"><span style="width:' + (p*100).toFixed(1) + '%"></span></div></td>' +
+        '<td class="pct">' + (p*100).toFixed(2) + ' %</td>';
+      elTabla.appendChild(fila);
+    });
+  }
+
+  // ---- Comprobación inicial: ¿hay servidor y modelo disponibles?
+  localizarServidor().then(d => {
+    const pie = document.getElementById('pie');
+    if(d === null){
+      mostrarAviso(AYUDA_SERVIDOR, true);
+      pie.textContent = 'Servidor de predicción no localizado.';
+      return;
+    }
+    if(!d.modelo_cargado){
+      mostrarAviso(
+        'El servidor está en marcha, pero todavía no hay un modelo entrenado. ' +
+        'Ejecuta «python src/train_model.py» y vuelve a intentarlo.', true);
+      pie.textContent = 'Modelo no entrenado todavía.';
+      return;
+    }
+    if(d.exactitud_test){
+      pie.textContent =
+        'Modelo ' + (d.arquitectura || '').toUpperCase() + ' entrenado con ' +
+        (d.dataset || 'EMNIST') + ' — exactitud sobre el conjunto de prueba: ' +
+        (d.exactitud_test * 100).toFixed(2) + ' %';
+    }
+  });
+
+  limpiar();
+
+  // ---- Modo demostración: abrir «/?demo=A» escribe esa letra en el recuadro
+  // y lanza la predicción automáticamente. Sirve para comprobar el sistema de
+  // punta a punta (página + servidor + modelo) sin tener que dibujar a mano.
+  const demo = (new URLSearchParams(location.search).get('demo') || '').trim();
+  if(/^[A-Za-z]$/.test(demo)){
+    ctx.save();
+    ctx.fillStyle = '#000000';
+    ctx.font = '600 185px Georgia, "Times New Roman", serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(demo.toUpperCase(), lienzo.width / 2, lienzo.height / 2 + 6);
+    ctx.restore();
+    hayTrazo = true;
+    setTimeout(predecir, 250);
+  }
+})();
+</script>
+</body>
+</html>

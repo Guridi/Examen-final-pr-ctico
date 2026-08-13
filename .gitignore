@@ -1,0 +1,16 @@
+# Entorno virtual
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Artefactos generados
+modelo/*.keras
+resultados/detalle/
+resultados/_chk_*.png
+
+# Sistema
+.DS_Store
